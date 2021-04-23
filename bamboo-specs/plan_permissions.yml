@@ -1,0 +1,14 @@
+---
+version: 2
+plan:
+  key: BAMBOO-VAULTAD
+plan-permissions:
+- groups:
+  - vault.admins
+  permissions:
+  - view
+  - edit
+  - build
+  - clone
+  - admin
+...

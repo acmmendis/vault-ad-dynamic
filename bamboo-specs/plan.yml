@@ -1,0 +1,126 @@
+---
+version: 2
+
+variables:
+  ad_ldap_secret: BAMSCRT@0@0@ovawie1shahNaeNaoZae4Eesoh0oob
+  vault_address: https://vault.myinternal.com:8200
+  vault_secret: BAMSCRT@0@0@kune8yahthe6thaenei7Lahs3iehae
+
+triggers: []
+
+branches:
+  create: manually
+  delete:
+    after-deleted-days: 5
+    after-inactive-days: 10
+  link-to-jira: true
+
+notifications:
+  - recipients:
+      - users:
+          - vault.admins@amyinternal.com
+      - watchers
+    events:
+      - plan-failed
+      - plan-completed
+      - job-error
+      - job-failed
+      - job-hung
+      - job-queue-timeout
+      - job-queued-without-capable-agents
+
+labels: []
+
+other:
+  concurrent-build-plugin: system-default
+
+plan:
+  project-key: BAMBOO
+  key: VAULTAD
+  name: Vault AD Dynamic Secrets Setup
+
+stages:
+
+- Engine Configuration:
+    manual: false
+    final: false
+    jobs:
+    - AD Secrets Engine Configuration
+
+- Roles Configuration:
+    manual: false
+    final: false
+    jobs:
+    - AD Service Roles Setup
+
+- Final Cleanup:
+    manual: false
+    final: true
+    jobs:
+    - Final Cleanup
+
+AD Secrets Engine Configuration:
+  key: JOB1
+  other:
+    clean-working-dir: true
+  tasks:
+  - checkout:
+      force-clean-build: 'true'
+  - script:
+      interpreter: SHELL
+      scripts:
+      - |-
+        set -e
+        export VAULT_ADDR=${bamboo_vault_address}
+        export VAULT_TOKEN=${bamboo_vault_secret}
+        AD=$(vault secrets list -format=json | jq -r '."ad/".type')
+      
+        if [ $AD != 'ad' ] ; then vault secrets enable ad; fi
+        vault secrets tune --default-lease-ttl=300  --max-lease-ttl=10800 --description='Active Directory Dynamic Password for automation' ad/
+        vault write ad/config binddn="CN=service_vault,OU=Service-Accounts,DC=ad,DC=myinternal,DC=com" bindpass=${bamboo_ad_ldap_secret} url="ldaps://ad.myinternal.com" userdn="OU=Vault-Dynamic-Secrets,OU=Service-Accounts,DC=ad,DC=myinternal,DC=com" password_policy='ad-default-policy' formatter='' length=0 last_rotation_tolerance=15 max_ttl=10800 ttl=300
+        unset VAULT_TOKEN
+        unset VAULT_ADDR
+  requirements:
+  - agent: "bamboo-linux-agent.*"
+
+AD Service Roles:
+  key: JOB2
+  other:
+    clean-working-dir: true
+  tasks:
+  - checkout:
+      force-clean-build: 'true'
+  - script:
+      interpreter: SHELL
+      scripts:
+      - |-
+        set -e
+        export VAULT_ADDR=${bamboo_vault_address}
+        export VAULT_TOKEN=${bamboo_vault_secret}
+        vault write -force ad/roles/service_exs service_account_name="service_exs@myinternal.com" ttl=180m
+        vault write -force ad/roles/service_ansible service_account_name="service_ansible@myinternal.com" ttl=3600
+        unset VAULT_TOKEN
+        unset VAULT_ADDR
+  requirements:
+  - agent: "bamboo-linux-agent.*"
+
+Final Cleanup:
+  key: JOB3
+  other:
+    clean-working-dir: true
+  final-tasks:
+  - checkout:
+      force-clean-build: 'false'
+
+  - script:
+      interpreter: SHELL
+      scripts:
+      - |-
+        export VAULT_ADDR=${bamboo_vault_address}
+        export VAULT_TOKEN=${bamboo_vault_secret}
+        vault token revoke -self
+        unset VAULT_TOKEN
+        unset VAULT_ADDR
+  requirements:
+  - agent: "bamboo-linux-agent.*"
+...
